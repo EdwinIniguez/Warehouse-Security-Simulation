@@ -6,7 +6,8 @@ app = Flask(__name__)
 
 # Definición de la Clase Camara-----------------------------------------------------------------------------
 class Camara(ap.Agent):
-    def setup(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.detected_movement = False
 
     def detect_movement(self, environment):
@@ -17,7 +18,8 @@ class Camara(ap.Agent):
 
 # Definición de la Clase Dron-----------------------------------------------------------------------------
 class Dron(ap.Agent):
-    def setup(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.suspicion_detected = False
         self.investigating = False
 
@@ -39,7 +41,8 @@ class Dron(ap.Agent):
 
 # Definición de la Clase PersonalSeguridad-----------------------------------------------------------------------------
 class PersonalSeguridad(ap.Agent):
-    def setup(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.alerted = False
 
     def notify_threat(self, dron):
@@ -57,11 +60,17 @@ class PersonalSeguridad(ap.Agent):
 
 # Definición del Modelo de Almacén-----------------------------------------------------------------------------
 class AlmacenModel(ap.Model):
-    def setup(self):
-        # Crear agentes
-        self.dron = Dron(self)
+    def __init__(self, model_parameters):
+        super().__init__(model_parameters)
+        # Crear lista de cámaras
         self.camaras = ap.AgentList(self, 3, Camara)
+        # Crear dron
+        self.dron = Dron(self)
+        # Crear personal de seguridad
         self.security_personnel = PersonalSeguridad(self)
+
+    def setup(self):
+        pass
     
     def step(self):
         # Las cámaras buscan movimiento
@@ -74,7 +83,7 @@ class AlmacenModel(ap.Model):
         # El personal de seguridad evalúa si se ha detectado una amenaza
         self.security_personnel.evaluate_threat()
 
-# Inicializa el modelo-----------------------------------------------------------------------------
+# Inicializa el modelo
 parameters = {'steps': 1}  # Solo un paso por llamada para sincronización con Unity
 model = AlmacenModel(parameters)
 
