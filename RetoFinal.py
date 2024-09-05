@@ -1,46 +1,70 @@
+"""
+Author: Moises Adrian Cortes Ramos A01642492
+"""
 import json
 from flask import Flask, request, jsonify
 import agentpy as ap
 #from owlready2 import *
 
+
 app = Flask(__name__)
 
-# Definimos el modelo con agentes (Dron, Camara, PersonalSeguridad)
+# Agente Camara
 class Camara(ap.Agent):
+    def __init__(self, model, idx):
+        super().__init__(model)
+        self.id = idx
+        self.precision = 0.9  # Probabilidad de detección correcta
+        self.falsas_alarmas = 0
+
     def detect_movement(self, agent_model, event_data):
         if event_data['detected_movement']:
-            mensaje = {
-                'performativa': 'alarma',
-                'contenido': {
-                    'evento': 'Ladrón detectado',
-                    'ubicación': event_data['camara_position']
+            # Usar np_random para detección aleatoria basada en la precisión
+            if self.model.np_random.random() < self.precision:  # Detección correcta
+                mensaje = {
+                    'performativa': 'alarma',
+                    'contenido': {
+                        'evento': 'Ladrón detectado',
+                        'ubicación': event_data['camara_position']
+                    }
                 }
-            }
-            agent_model.enviar_mensaje(mensaje, agent_model.dron)
+                agent_model.enviar_mensaje(mensaje, agent_model.dron)
+            else:
+                self.falsas_alarmas += 1
+                print(f"{self}: Falsa alarma, total: {self.falsas_alarmas}")
 
+# Agente Dron
 class Dron(ap.Agent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.investigando = False
         self.mensaje_buzon = []
-    
+        self.bateria = 100  # Batería del dron
+
     def recibir_mensaje(self, mensaje):
         self.mensaje_buzon.append(mensaje)
     
     def investigar(self, model):
+        if self.bateria <= 0:
+            print(f"{self}: No puede investigar, batería agotada.")
+            return
+        
         for mensaje in self.mensaje_buzon:
             if mensaje['performativa'] == 'alarma':
                 ubicacion = mensaje['contenido']['ubicación']
                 print(f"{self}: Investigando {mensaje['contenido']['evento']} en {ubicacion}")
                 self.investigando = True
                 model.personal_seguridad.recibir_mensaje(mensaje)
+                self.bateria -= 10  # Gastar batería por cada investigación
         self.mensaje_buzon.clear()
 
+# Agente Personal de Seguridad
 class PersonalSeguridad(ap.Agent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.alertado = False
         self.mensaje_buzon = []
+        self.falsas_alarmas = 0
     
     def recibir_mensaje(self, mensaje):
         self.mensaje_buzon.append(mensaje)
@@ -49,7 +73,13 @@ class PersonalSeguridad(ap.Agent):
         for mensaje in self.mensaje_buzon:
             if mensaje['performativa'] == 'alarma':
                 print(f"{self}: Evaluando {mensaje['contenido']['evento']} en {mensaje['contenido']['ubicación']}")
-                self.alertado = True
+                # Usar np_random para evaluar si es una amenaza real
+                if self.model.np_random.random() < 0.8:  # 80% probabilidad de ser amenaza real
+                    print(f"{self}: Amenaza real detectada.")
+                    self.alertado = True
+                else:
+                    self.falsas_alarmas += 1
+                    print(f"{self}: Falsa alarma detectada. Total: {self.falsas_alarmas}")
         self.mensaje_buzon.clear()
 
 # Modelo de almacén
@@ -58,7 +88,7 @@ class AlmacenModel(ap.Model):
         super().__init__()
         self.dron = Dron(self)
         self.personal_seguridad = PersonalSeguridad(self)
-        self.camaras = ap.AgentList(self, 3, Camara)
+        self.camaras = ap.AgentList(self, 5, Camara)
         self.dron.position = [0, 0]
 
     def setup(self):
@@ -84,10 +114,12 @@ class AlmacenModel(ap.Model):
     def generar_respuesta_json(self):
         estado_dron = {
             'investigando': self.dron.investigando,
+            'bateria': self.dron.bateria,
             'dron_position': self.dron.position,
         }
         estado_seguridad = {
-            'alertado': self.personal_seguridad.alertado
+            'alertado': self.personal_seguridad.alertado,
+            'falsas_alarmas': self.personal_seguridad.falsas_alarmas
         }
         return json.dumps({
             'estado_dron': estado_dron,
@@ -98,10 +130,10 @@ class AlmacenModel(ap.Model):
         self.dron.investigar(self)
         self.personal_seguridad.evaluar_amenaza()
 
-# Crear instancia del modelo
+# Instanciar el modelo
 model = AlmacenModel()
 
-# API para recibir datos de Unity
+# API Flask para recibir datos y responder a Unity
 @app.route('/unity-to-python', methods=['POST'])
 def unity_to_python():
     try:
