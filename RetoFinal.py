@@ -1,125 +1,127 @@
+import json
 from flask import Flask, request, jsonify
 import agentpy as ap
+#from owlready2 import *
 
-# Inicialización de la API
 app = Flask(__name__)
 
-# Definición de la Clase Camara-----------------------------------------------------------------------------
+# Definimos el modelo con agentes (Dron, Camara, PersonalSeguridad)
 class Camara(ap.Agent):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.detected_movement = False
+    def detect_movement(self, agent_model, event_data):
+        if event_data['detected_movement']:
+            mensaje = {
+                'performativa': 'alarma',
+                'contenido': {
+                    'evento': 'Ladrón detectado',
+                    'ubicación': event_data['camara_position']
+                }
+            }
+            agent_model.enviar_mensaje(mensaje, agent_model.dron)
 
-    def detect_movement(self, environment):
-        # Simulación de la detección de movimiento
-        self.detected_movement = self.model.random.choice([True, False]) #Aqui entra la vision computacional para definir si se encontro una amenaza o no
-        if self.detected_movement:
-            self.model.dron.notify_suspicion(self)
-
-# Definición de la Clase Dron-----------------------------------------------------------------------------
 class Dron(ap.Agent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.suspicion_detected = False
-        self.investigating = False
+        self.investigando = False
+        self.mensaje_buzon = []
+    
+    def recibir_mensaje(self, mensaje):
+        self.mensaje_buzon.append(mensaje)
+    
+    def investigar(self, model):
+        for mensaje in self.mensaje_buzon:
+            if mensaje['performativa'] == 'alarma':
+                ubicacion = mensaje['contenido']['ubicación']
+                print(f"{self}: Investigando {mensaje['contenido']['evento']} en {ubicacion}")
+                self.investigando = True
+                model.personal_seguridad.recibir_mensaje(mensaje)
+        self.mensaje_buzon.clear()
 
-    def notify_suspicion(self, camara):
-        print(f'Dron: Movimiento sospechoso detectado por {camara}.')
-        self.suspicion_detected = True
-
-    def investigate(self):
-        if self.suspicion_detected and not self.investigating:
-            print('Dron: Investigando la zona sospechosa...')
-            self.investigating = True
-            self.suspicion_detected = False
-            if self.model.random.choice([True, False]): #Aqui entra la vision computacional para definir si se encontro una amenaza o no
-                print('Dron: Se encontró algo sospechoso.')
-                self.model.security_personnel.notify_threat(self)
-            else:
-                print('Dron: No se encontró nada sospechoso.')
-            self.investigating = False
-
-# Definición de la Clase PersonalSeguridad-----------------------------------------------------------------------------
 class PersonalSeguridad(ap.Agent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.alerted = False
+        self.alertado = False
+        self.mensaje_buzon = []
+    
+    def recibir_mensaje(self, mensaje):
+        self.mensaje_buzon.append(mensaje)
+    
+    def evaluar_amenaza(self):
+        for mensaje in self.mensaje_buzon:
+            if mensaje['performativa'] == 'alarma':
+                print(f"{self}: Evaluando {mensaje['contenido']['evento']} en {mensaje['contenido']['ubicación']}")
+                self.alertado = True
+        self.mensaje_buzon.clear()
 
-    def notify_threat(self, dron):
-        print('Personal de Seguridad: Recibido informe del dron sobre posible amenaza.')
-        self.alerted = True
-
-    def evaluate_threat(self):
-        if self.alerted:
-            print('Personal de Seguridad: Evaluando la amenaza...')
-            if self.model.random.choice([True, False]): #Aqui entra la vision computacional para definir si se encontro una amenaza o no
-                print('Personal de Seguridad: ¡Alerta general activada!')
-            else:
-                print('Personal de Seguridad: Falsa alarma. No hay amenaza.')
-            self.alerted = False
-
-# Definición del Modelo de Almacén-----------------------------------------------------------------------------
+# Modelo de almacén
 class AlmacenModel(ap.Model):
-    def __init__(self, model_parameters):
-        super().__init__(model_parameters)
-        # Crear lista de cámaras
-        self.camaras = ap.AgentList(self, 3, Camara)
-        # Crear dron
+    def __init__(self):
+        super().__init__()
         self.dron = Dron(self)
-        # Crear personal de seguridad
-        self.security_personnel = PersonalSeguridad(self)
+        self.personal_seguridad = PersonalSeguridad(self)
+        self.camaras = ap.AgentList(self, 3, Camara)
+        self.dron.position = [0, 0]
 
     def setup(self):
-        pass
+        for idx, camara in enumerate(self.camaras):
+            camara.position = [0, idx * 10]
     
+    def recibir_datos_json(self, datos_json):
+        try:
+            datos = json.loads(datos_json)
+            self.dron.position = datos['drone_position']
+            for idx, camara in enumerate(self.camaras):
+                event_data = {
+                    'camara_position': datos.get(f'camara_{idx}_position', [0, 0]),
+                    'detected_movement': datos.get(f'camara_{idx}_detected_movement', False)
+                }
+                camara.detect_movement(self, event_data)
+        except json.JSONDecodeError:
+            print("Error al decodificar el JSON")
+
+    def enviar_mensaje(self, mensaje, agente):
+        agente.recibir_mensaje(mensaje)
+
+    def generar_respuesta_json(self):
+        estado_dron = {
+            'investigando': self.dron.investigando,
+            'dron_position': self.dron.position,
+        }
+        estado_seguridad = {
+            'alertado': self.personal_seguridad.alertado
+        }
+        return json.dumps({
+            'estado_dron': estado_dron,
+            'estado_seguridad': estado_seguridad
+        })
+
     def step(self):
-        # Las cámaras buscan movimiento
-        for camara in self.camaras:
-            camara.detect_movement(self)
-        
-        # El dron investiga si se detectó algo
-        self.dron.investigate()
-        
-        # El personal de seguridad evalúa si se ha detectado una amenaza
-        self.security_personnel.evaluate_threat()
+        self.dron.investigar(self)
+        self.personal_seguridad.evaluar_amenaza()
 
-# Inicializa el modelo
-parameters = {'steps': 1}  # Solo un paso por llamada para sincronización con Unity
-model = AlmacenModel(parameters)
+# Crear instancia del modelo
+model = AlmacenModel()
 
-
-# Rutas de la API-----------------------------------------------------------------------------
-
-# Aquí se asume que las clases de los agentes y el modelo ya están definidas
-
+# API para recibir datos de Unity
 @app.route('/unity-to-python', methods=['POST'])
 def unity_to_python():
     try:
         data = request.json
         print("Datos recibidos de Unity:", data)
-
-        # Aquí puedes actualizar el estado del modelo con la información de Unity si es necesario
-
-        model.step()  # Ejecuta un paso del modelo
-
-        # Envía la respuesta del modelo a Unity
-        response = {
-            "drone_status": "Investigating" if model.dron.investigating else "Idle",
-            "security_alert": "True" if model.security_personnel.alerted else "False"
-        }
         
+        # Actualiza el estado del modelo
+        model.recibir_datos_json(json.dumps(data))
+
+        # Ejecuta un paso del modelo
+        model.step()
+
+        # Generar la respuesta en JSON
+        response = model.generar_respuesta_json()
         print("Enviando respuesta a Unity:", response)
-        return jsonify(response)
+        
+        return jsonify(json.loads(response))
     
-    except ValueError as ve:
-        print("ValueError occurred:", str(ve))
-    except KeyError as ke:
-        print("KeyError occurred:", str(ke))
-    except IndexError as ie:
-        print("IndexError occurred:", str(ie))
     except Exception as e:
-        print("An error occurred:", str(e))
-        print("Ocurrió un error:", str(e))
+        print("Error occurred:", str(e))
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
