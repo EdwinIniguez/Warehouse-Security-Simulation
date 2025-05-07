@@ -1,3 +1,8 @@
+# Warehourse Security Simulation
+
+This is a warehouse Security simulation inside Unity Game engine that utilizes Computer Vision to detect humanlike figures and Agent based security drone for survaillance.
+
+## Things to consider before running Project
 Para crear un ambiente virtual nuevo muevete a la carpeta donde vaz a trabajar y pon en la terminal:
 python -m venv .venv
 
